@@ -1,0 +1,73 @@
+$(document).ready(function() {
+
+    $("#restart_measured").click(function() {
+        var elem = $(this).parent();
+        $.getJSON("restart_measured", function(success) {
+            if(success == true) {
+                elem.clone().html(_("The measurment has been restarted.")).hide().appendTo(".flash").slideToggle();
+                elem.slideUp();
+            }
+        })
+    });
+
+    $("#start_measured").click(function() {
+        var elem = $(this).parent();
+        $.getJSON("start_measured", function(success) {
+            if(success == true) {
+                elem.clone().html(_("The measurment has been started.")).hide().appendTo(".flash").slideToggle();
+                elem.slideUp();
+            }
+        })
+    });
+
+    var diff;
+
+    var set_clock = function() {
+        var qnow = new Date(new Date().getTime() - diff);
+        var frmt = sprintf("%04d-%02d-%02d %02d:%02d:%02d", qnow.getFullYear(), qnow.getMonth() + 1, qnow.getDate(), qnow.getHours(), qnow.getMinutes(), qnow.getSeconds());
+        $("#information .time").text(frmt);
+
+        setTimeout(set_clock, 1000 - qnow % 1000);
+    };
+
+    var get_time = function() {
+        var start = new Date().getTime();
+
+        $.ajax({
+            url: 'time.json',
+            dataType: 'json',
+            cache: false,
+            success: function(qtime) {
+                var qdate = new Date(qtime[0], qtime[1], qtime[2], qtime[3], qtime[4], qtime[5], qtime[6]).getTime();
+                var now = new Date().getTime();
+
+                document.connection_delay = now - start;
+
+                diff = now - (now - start) / 2 - qdate;
+
+                set_clock();
+            },
+            error: function() {
+                setTimeout(get_time, 500);
+            },
+        });
+    };
+
+    get_time();
+
+	$("#start_checkfs").click(function() {
+        var elem = $(this).parent();
+		var clone = elem.clone();
+		elem.slideUp();
+        $.getJSON("start_checkfs", function(success) {
+			if (success) {
+                clone.html(_("Filesystem check is in progress.")).hide().appendTo(".flash").slideDown();
+			}
+			else {
+				alert(_("Error initiating filesystem check."));
+			}
+		});
+	});
+
+
+});

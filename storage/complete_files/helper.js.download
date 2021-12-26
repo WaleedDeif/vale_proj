@@ -1,0 +1,386 @@
+String.prototype.capitalize = function() {
+    return this.replace(/(^|\s)([a-z])/g, function(m, p1, p2) {
+        return p1 + p2.toUpperCase();
+    });
+};
+
+Array.prototype.count = function(e) {
+    var c = 0;
+    for(var i = 0; i < this.length; i++) {
+        if(e === this[i]) c++;
+    }
+    return c;
+};
+
+function sorted_keys(o, f) {
+    var a = [];
+    $.each(o, function(k, _) { a.push(k); });
+    if(f) a.sort(f); else a.sort(); // IE8 can't a.sort(undefined)
+    return a;
+}
+
+var ElementCache = function(root) {
+    this.cache = {};
+
+    this.get_element = function(id, view_factory, destructor) {
+        if(this.cache[id]) {
+            obj = this.cache[id];
+            obj.used = true;
+            return obj;
+        } else {
+            // create object
+            var obj = {
+                used: true,
+            }
+
+            obj.view = view_factory(obj);
+            obj.destructor = destructor;
+            obj.hidden = false;
+
+            // append view to root element
+
+            var appended = false;
+
+            obj.commit_append = function() {
+                if(!appended) {
+                    root.append(obj.view);
+                    appended = true;
+                }
+            }
+
+            // insert into cache
+            this.cache[id] = obj;
+
+            return obj;
+        }
+    }
+
+    this.gc = function() {
+        var cache = this.cache;
+
+        $.each(cache, function(id, obj) {
+            if(!obj.used) {
+                obj.view.remove();
+				if (obj.destructor) obj.destructor(obj);
+                delete cache[id];
+            } else {
+                obj.used = false;
+            }
+        });
+    }
+};
+
+var Mapper = function(array){
+    var mapper = this;
+
+    var magic_mapper = {};
+    var next_id = 0;
+
+    var Mapping = function(id){
+        var mapping = this;
+
+        this.update = function(new_value){
+            array[magic_mapper[id]] = new_value;
+        }
+
+        this.remove = function(){
+            var array_index = magic_mapper[id];
+            array.splice(array_index, 1);
+            $.each(magic_mapper, function(key, value){
+                if(value == array_index){
+                    delete magic_mapper[key];
+                }
+                else if(value > array_index) {
+                    magic_mapper[key] = value - 1;
+                }
+            });
+        }
+
+        this.move = function(np){
+            // insert move function here
+            var array_index = magic_mapper[id];
+            var v = array[array_index];
+            array.splice(array_index, 1);
+            array.splice(np, 0, v);
+            $.each(magic_mapper, function(key, value){
+                if(value >= np){
+                    magic_mapper[key] = value + 1;
+                }
+                if(value > array_index){
+                    magic_mapper[key] = value -1;
+                }
+                if(value == array_index){
+                    magic_mapper[key] = np;
+                }
+            })
+        }
+
+        this.get = function(){
+            return array[magic_mapper[id]];
+        }
+
+        this.set = function(data){
+            array[magic_mapper[id]] = data;
+        }
+    }
+
+    this.iterate = function(cb) {
+        $.each(array, function(index) {
+            cb(mapper.get_mapping(index));
+        });
+    }
+
+    this.get_mapping = function(index){
+        var id = next_id;
+        magic_mapper[id] = index;
+        next_id++;
+        return new Mapping(id);
+    }
+    
+    this.append = function(new_element){
+        var index = array.length;
+        array[index] = new_element;
+        return this.get_mapping(index);
+    }
+}
+
+var init_array = function(id, append_to, factory, array){
+    var list_container = $('<div class="alt_label"></div>');
+    var list_span = $('<span><div class="array_list_input"></div><div class="add"></div></span>');
+    var array_list = list_span.find('.array_list_input');
+    var add_div = list_span.find('.add');
+    list_container.append(create_key(id));
+    list_container.append(list_span);
+    
+    var mapper = new Mapper(array);
+
+    var create_list_element = function(mapping){
+        var label = $('<label></label>');
+        var delete_button = $('<button>X</button>');
+        var array_element = mapping.get();
+        var update = function(new_value){
+            mapping.update(new_value);
+        };
+        factory(label, update, array_element);
+        delete_button.click(function(){
+            try{
+                mapping.remove();
+                label.remove();
+            }
+            catch(e){
+                console.log(e);
+            }
+            return false;
+        });
+        label.append(delete_button);
+        return label;
+    }
+
+    $.each(array, function(index, array_element){
+        var mapping = mapper.get_mapping(index);
+        array_list.append(create_list_element(mapping));
+    });
+
+    var add_button = $('<button></button>').text(_("Add"));
+    add_button.click(function(){
+        try{
+            var mapping = mapper.append();
+            array_list.append(create_list_element(mapping));
+        }
+        catch(e){
+            console.log(e);
+        }
+        return false;
+    });
+    add_div.append(add_button);
+    append_to.append(list_container);
+
+};
+
+var get_key = function(config, path, default_value) {
+    var key;
+    if(typeof path == "string"){
+        key = path;
+        path = [];
+    }
+    else{
+        key = path.shift();
+    }
+
+    if(config.hasOwnProperty(key) && config[key] != undefined){
+        if(path.length == 0){
+            return config[key];
+        }
+        else{
+            get_value(config[key], path, default_value);
+        }
+    }
+    else{
+        if(path.length == 0){
+            return config[key] = default_value;
+        }
+        else{
+            config[key] = {};
+            get_value(config[key], path, default_value);
+        }
+    }
+};
+
+var create_key = function(key){
+    var key_span = $('<span class="key"></span>');
+    key_span.text(key + ":");
+    return key_span;
+};
+
+var load_helper = function(id, type_name, $data) {
+    var file = id;
+    var anchor = null;
+
+    var anchor_index = file.indexOf('#');
+
+    if (anchor_index != -1) {
+        anchor = file.substr(anchor_index + 1);
+        file = file.substr(0, anchor_index);
+    }
+
+    $.ajax({
+        url: "../doc/" + file + ".html",
+        success: function(data){
+			var types = {"small": {"width": 600, "height": 600, "minWidth": 200, "minHeight": 300}};
+			var type = types[type_name || "small"]
+			if (!$data) {
+				$('#helper').remove();
+				$data = $('<div id="helper"/>').html(data);
+				$data.dialog({
+					title: "Help Page",
+					width: type["width"],
+					height: type["height"],
+					minWidth: type["minWidth"],
+					minHeight: type["minHeight"],
+				});
+			}
+			else $data.html(data);
+
+            var scrollTo = function(name) {
+                el = $data.find('[name="' + name + '"]')[0];
+
+                if(el) {
+                    $data[0].scrollTop = el.offsetTop - 15;
+                } else {
+                    console.log("Anchor not found");
+                }
+            };
+
+            if(anchor) {
+                scrollTo(anchor);
+            }
+
+            $data.find('a[href]').each(function(_, a) {
+                var href = a.getAttribute('href');
+
+                if(href[0] == '#') {
+                    a.onclick = function(event) {
+                        scrollTo(href.substr(1));
+                        event.preventDefault();
+                    }
+                }
+            });
+        },
+        cache: false
+    });
+}
+
+var append_key_value = function(name, $root, help_id) {
+    var $pair = $('<label class="pair">');
+
+    var $key = $('<span class="key">').text(name);
+    var $value = $('<span class="value">');
+
+    $pair.append($key);
+    $pair.append($value);
+    if(help_id){
+        var $help = $('<span class="help"><img src="../img/info_14.png" /></span>');
+        $pair.append($help);
+        $help.click(function(){
+            load_helper(help_id);
+        });
+    }
+
+    $root.append($pair);
+
+    return $value;
+}
+
+var create_input = function(name, id, $root, config, fallback, transform) {
+    if(typeof transform != 'function') {
+        transform = function(v) { return v; }
+    }
+
+    var $value =  append_key_value(name, $root);
+
+    var $input = $('<input type="text">').val(get_key(config, id, fallback || ""));
+
+    $input.change(function() {
+        config[id] = transform($input.val());
+    });
+
+    $input.change();
+
+    $value.append($input);
+};
+
+var create_number_input = function(name, id, $root, config, fallback, options, help_id) {
+    options = options || {};
+    var transform = options["transform"];
+    var min = options["min"];
+    var max = options["max"];
+    var step = options["step"];
+    if(typeof transform != 'function') {
+        transform = function(v) { return v; }
+    }
+
+    var $value =  append_key_value(name, $root, help_id);
+
+    var $input = $('<input type="number">').val(get_key(config, id, fallback || 0));
+    if(min){
+        $input.prop("min", min);
+    }
+    if(max){
+        $input.prop("max", max);
+    }
+    if(step){
+        $input.prop("step", step);
+    }
+
+    $input.change(function() {
+        config[id] = transform(parseFloat($input.val()));
+    });
+
+    $input.change();
+
+    $value.append($input);
+};
+
+var create_bool_input = function(name, id, $root, config, fallback, transform) {
+    if(typeof transform != 'function') {
+        transform = function(v) { return v; }
+    }
+
+    var $value =  append_key_value(name, $root);
+
+    var $input = $('<input type="checkbox">').prop('checked', get_key(config, id, fallback || false));
+
+    $input.change(function() {
+        config[id] = transform($input.prop('checked'));
+    });
+
+    $input.change();
+
+    $value.append($input);
+};
+
+// keep IE silent
+if (typeof console == "undefined") {
+    var console = { log: function() {} }
+}
+
